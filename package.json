@@ -1,0 +1,28 @@
+{
+  "name": "dsie-plugin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "vite build --config vite.config.ui.ts && vite build --config vite.config.code.ts",
+    "build:ui": "vite build --config vite.config.ui.ts",
+    "build:code": "vite build --config vite.config.code.ts"
+  },
+  "keywords": [],
+  "author": "Ruttvik Aron",
+  "license": "MIT",
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.129.0",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vite-plugin-singlefile": "^2.3.3"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}

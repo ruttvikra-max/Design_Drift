@@ -1,0 +1,8 @@
+{
+  "name": "DSIE — Design System Inspector",
+  "id": "dsie-internal-tool",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/index.html",
+  "editorType": ["figma"]
+}
