@@ -1,6 +1,7 @@
 import { traversePage, collectTokenLibrary } from './traversal'
-import { analyzeComponents, analyzeTokens, analyzeNaming, analyzeSpacing } from './analyzers'
-import { computeDriftScore, capViolations } from './scoring'
+import { analyzeComponents, analyzeTokens, analyzeNaming } from './analyzers'
+import { analyzeSpacing } from './spacing'
+import { computeDriftScore, capViolations, scorePillar } from './scoring'
 
 figma.showUI(__html__, { width: 360, height: 560, title: 'DSIE - Design System Inspector' })
 
@@ -62,11 +63,23 @@ async function runAnalysis(): Promise<void> {
       return order[a.severity] - order[b.severity]
     })
 
-    var drift = computeDriftScore(
-      compAnalysis.result, tokenAnalysis.result,
-      namingAnalysis.result, spacingAnalysis.result
-    )
-    var violationsToSend = capViolations(allViolations, 500)
+    var compScore    = scorePillar('component', compAnalysis.result)
+    var tokenScore   = scorePillar('token', tokenAnalysis.result)
+    var namingScore  = scorePillar('naming', namingAnalysis.result)
+    var spacingScore = scorePillar('spacing', spacingAnalysis.result)
+
+    var drift = computeDriftScore(compScore, tokenScore, namingScore, spacingScore)
+    var violationsToSend = capViolations(allViolations, 1000)
+
+    // Per-pillar counts are derived from the VIOLATIONS ACTUALLY SENT, so a tab's
+    // number can never disagree with what its filter shows.
+    function countPillar(pillar: string): number {
+      var n = 0
+      for (var k = 0; k < violationsToSend.length; k++) {
+        if (violationsToSend[k].pillar === pillar) n++
+      }
+      return n
+    }
 
     figma.ui.postMessage({
       type: 'ANALYSIS_COMPLETE',
@@ -77,12 +90,12 @@ async function runAnalysis(): Promise<void> {
       pageName: figma.currentPage.name,
       scannedNodes: nodes.length,
       truncated: traversalResult.truncated,
-      totalViolations: allViolations.length,
+      totalViolations: violationsToSend.length,
       pillars: {
-        component: { score: compAnalysis.result.score,   violations: compAnalysis.result.violations,   weight: 0.35 },
-        token:     { score: tokenAnalysis.result.score,   violations: tokenAnalysis.result.violations,   weight: 0.30 },
-        naming:    { score: namingAnalysis.result.score,  violations: namingAnalysis.result.violations,  weight: 0.20 },
-        spacing:   { score: spacingAnalysis.result.score, violations: spacingAnalysis.result.violations, weight: 0.15 },
+        component: { score: compScore,    violations: countPillar('component'), weight: 0.35 },
+        token:     { score: tokenScore,   violations: countPillar('token'),     weight: 0.30 },
+        naming:    { score: namingScore,  violations: countPillar('naming'),    weight: 0.20 },
+        spacing:   { score: spacingScore, violations: countPillar('spacing'),   weight: 0.15 },
       },
       violations: violationsToSend,
     })

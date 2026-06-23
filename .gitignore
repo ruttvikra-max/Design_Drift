@@ -4,6 +4,9 @@ node_modules/
 # Build output (regenerate with: npm install && npm run build)
 dist/
 
+# Dev-only validation harness (not part of the plugin)
+scratch/
+
 # Editor / OS
 .vscode/
 .idea/

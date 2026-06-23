@@ -290,6 +290,20 @@ function ResultsView({ result, violations, filter, onFilterChange, onSelectNode,
         </div>
       </div>
 
+      {/* Total issues summary */}
+      <div className="issues-summary">
+        {result.totalViolations === 0 ? (
+          <span className="issues-summary-clean">No issues found — designs are consistent 🎉</span>
+        ) : (
+          <>
+            <span className="issues-summary-count">{result.totalViolations.toLocaleString()}</span>
+            <span className="issues-summary-label">
+              {result.totalViolations === 1 ? 'issue to review' : 'issues to review'} — pick a pillar below to navigate
+            </span>
+          </>
+        )}
+      </div>
+
       {/* Filter tabs */}
       <div className="filter-tabs">
         <FilterTab label="All" count={result.totalViolations} active={filter === 'all'} onClick={() => onFilterChange('all')} />
@@ -362,6 +376,8 @@ function ViolationRow({ violation, onSelect }: { violation: Violation; onSelect:
     LOW: 'var(--severity-low)',
   }[violation.severity]
 
+  const hasEvidence = violation.expected || violation.location || violation.agreement
+
   return (
     <button className="violation-row" onClick={onSelect} title="Click to select node in Figma">
       <div className="violation-row-left">
@@ -369,6 +385,19 @@ function ViolationRow({ violation, onSelect }: { violation: Violation; onSelect:
         <div className="violation-info">
           <div className="violation-name">{violation.nodeName}</div>
           <div className="violation-detail">{violation.detail}</div>
+          {hasEvidence && (
+            <div className="violation-evidence">
+              {violation.expected && violation.actual && (
+                <span className="violation-evidence-cmp">
+                  <span className="violation-evidence-actual">{violation.actual}</span>
+                  <span className="violation-evidence-arrow">vs</span>
+                  <span className="violation-evidence-expected">{violation.expected}</span>
+                </span>
+              )}
+              {violation.location && <span className="violation-evidence-chip">{violation.location}</span>}
+              {violation.agreement && <span className="violation-evidence-agree">{violation.agreement}</span>}
+            </div>
+          )}
         </div>
       </div>
       <div className="violation-row-right">

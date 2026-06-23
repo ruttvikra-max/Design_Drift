@@ -12,6 +12,16 @@ export interface CollectedNode {
   depth: number
   scope: NodeScope
 
+  // Structural position — lets us match "the same element" across duplicated
+  // screens without depending on names (names collide or are auto-generated).
+  screenIndex: number   // 1-based index of the screen this belongs to (0 = none)
+  screenFamily: string  // normalized screen name, e.g. "NC Compare 11" -> "NC Compare"
+  childIndex: number    // index of this node within its parent's children
+  x: number             // position relative to parent (for geometric gap measurement)
+  y: number
+  width: number
+  height: number
+
   // Component analyzer (instances only)
   isInstance: boolean
   mainComponentId: string | null
@@ -50,7 +60,7 @@ export interface TokenLibrary {
   hasAnyTokens: boolean
 }
 
-const NODE_LIMIT = 8000
+const NODE_LIMIT = 50000
 
 const AUTO_NAME_RE = /^(Frame|Group|Rectangle|Ellipse|Vector|Text|Component|Instance|Star|Polygon|Line|Arrow|Image|Section|Slice)\s+\d+$/i
 
@@ -83,60 +93,70 @@ export function collectTokenLibrary(): TokenLibrary {
   return { colorHexes: hexes, hasAnyTokens: hasAny }
 }
 
+// A "screen" is any frame/component that is a direct child of the page OR of a
+// Section (recursively). Sections are organizational containers, not screens —
+// the real screens live inside them. This is why nested screens were previously
+// invisible to the analyzer.
+function normalizeFamily(name: string): string {
+  // Strip a trailing number (and any separators before it): "NC Compare 11" -> "NC Compare"
+  var f = name.replace(/[\s\-_]*\d+\s*$/, '')
+  f = f.replace(/^\s+/, '').replace(/\s+$/, '')
+  return f.length > 0 ? f : name
+}
+
 export function traversePage(
   onProgress: (count: number) => void
 ): { nodes: CollectedNode[]; truncated: boolean } {
   var nodes: CollectedNode[] = []
   var truncated = false
+  var screenCounter = 0
 
-  function walk(node: BaseNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string): void {
-    if (nodes.length >= NODE_LIMIT) {
-      truncated = true
+  // Walk within a single screen. screenIndex/screenName/screenFamily are fixed
+  // for the whole subtree; childIndex/depth are per-node structural position.
+  function walk(node: SceneNode, depth: number, parentId: string | null, screenRootId: string, screenName: string, screenFamily: string, screenIndex: number, childIndex: number): void {
+    if (nodes.length >= NODE_LIMIT) { truncated = true; return }
+    if (!node.visible) return
+
+    if (node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') {
+      nodes.push(extractComponent(node, depth, parentId, screenRootId, screenName, screenFamily, screenIndex, childIndex))
+      reportProgress(nodes.length, onProgress)
       return
     }
-
-    // Skip page/document wrappers — just recurse into children
-    if (node.type === 'DOCUMENT') return
-    if (node.type === 'PAGE') {
-      var page = node as PageNode
-      for (var i = 0; i < page.children.length; i++) {
-        // Each direct child of the page is a root frame (a screen)
-        var child = page.children[i]
-        walk(child, 0, null, child.id, child.name)
-      }
-      return
-    }
-
-    var scene = node as SceneNode
-    if (!scene.visible) return
-
-    // ── COMPONENT / COMPONENT_SET ──────────────────────────────────────────
-    if (scene.type === 'COMPONENT' || scene.type === 'COMPONENT_SET') {
-      nodes.push(extractComponent(scene, depth, parentId, rootFrameId, rootFrameName))
+    if (node.type === 'INSTANCE') {
+      nodes.push(extractInstance(node as InstanceNode, depth, parentId, screenRootId, screenName, screenFamily, screenIndex, childIndex))
       reportProgress(nodes.length, onProgress)
       return
     }
 
-    // ── INSTANCE ──────────────────────────────────────────────────────────
-    if (scene.type === 'INSTANCE') {
-      nodes.push(extractInstance(scene as InstanceNode, depth, parentId, rootFrameId, rootFrameName))
-      reportProgress(nodes.length, onProgress)
-      return
-    }
-
-    // ── WORKING CANVAS NODES (FRAME, TEXT, RECTANGLE, etc.) ───────────────
-    nodes.push(extractWorking(scene, depth, parentId, rootFrameId, rootFrameName))
+    nodes.push(extractWorking(node, depth, parentId, screenRootId, screenName, screenFamily, screenIndex, childIndex))
     reportProgress(nodes.length, onProgress)
 
-    if ('children' in scene) {
-      var parent = scene as (SceneNode & ChildrenMixin)
+    if ('children' in node) {
+      var parent = node as (SceneNode & ChildrenMixin)
       for (var j = 0; j < parent.children.length; j++) {
-        walk(parent.children[j], depth + 1, scene.id, rootFrameId, rootFrameName)
+        walk(parent.children[j], depth + 1, node.id, screenRootId, screenName, screenFamily, screenIndex, j)
       }
     }
   }
 
-  walk(figma.currentPage, 0, null, null, '')
+  // Discover screens: descend through the page and any nested Sections, treating
+  // every non-Section child as a screen root.
+  function discover(container: BaseNode & ChildrenMixin): void {
+    var kids = container.children
+    for (var i = 0; i < kids.length; i++) {
+      if (nodes.length >= NODE_LIMIT) { truncated = true; return }
+      var ch = kids[i] as SceneNode
+      if (!ch.visible) continue
+      if (ch.type === 'SECTION') {
+        discover(ch as unknown as (BaseNode & ChildrenMixin))
+        continue
+      }
+      screenCounter++
+      walk(ch, 0, null, ch.id, ch.name, normalizeFamily(ch.name), screenCounter, screenCounter - 1)
+    }
+  }
+
+  discover(figma.currentPage as unknown as (BaseNode & ChildrenMixin))
   return { nodes: nodes, truncated: truncated }
 }
 
@@ -146,19 +166,22 @@ function reportProgress(count: number, cb: (n: number) => void): void {
 
 // ─── Extractors ──────────────────────────────────────────────────────────────
 
-var NO_SPACING = {
-  rootFrameId: null as string | null, rootFrameName: '',
-  hasAutoLayout: false,
-  paddingTop: null as number | null, paddingRight: null as number | null,
-  paddingBottom: null as number | null, paddingLeft: null as number | null,
-  itemSpacing: null as number | null,
-  isPaddingBound: true, isItemSpacingBound: true,
+function readBox(node: SceneNode): { x: number; y: number; width: number; height: number } {
+  var n = node as any
+  return {
+    x: typeof n.x === 'number' ? n.x : 0,
+    y: typeof n.y === 'number' ? n.y : 0,
+    width: typeof n.width === 'number' ? n.width : 0,
+    height: typeof n.height === 'number' ? n.height : 0,
+  }
 }
 
-function extractComponent(node: SceneNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string): CollectedNode {
+function extractComponent(node: SceneNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string, screenFamily: string, screenIndex: number, childIndex: number): CollectedNode {
+  var box = readBox(node)
   return {
     id: node.id, parentId: parentId, name: node.name, type: node.type, depth: depth,
     scope: 'component',
+    screenIndex: screenIndex, screenFamily: screenFamily, childIndex: childIndex, x: box.x, y: box.y, width: box.width, height: box.height,
     isInstance: false, mainComponentId: null, overriddenFields: [], hasFillOverride: false,
     hasSolidFill: false, isFillBound: true, fillColorHex: null,
     hasStroke: false, isStrokeBound: true,
@@ -171,7 +194,7 @@ function extractComponent(node: SceneNode, depth: number, parentId: string | nul
   }
 }
 
-function extractInstance(node: InstanceNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string): CollectedNode {
+function extractInstance(node: InstanceNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string, screenFamily: string, screenIndex: number, childIndex: number): CollectedNode {
   var mainComponentId: string | null = null
   var overriddenFields: string[] = []
   var hasFillOverride = false
@@ -199,10 +222,12 @@ function extractInstance(node: InstanceNode, depth: number, parentId: string | n
   }
 
   var spacingData = readSpacing(node)
+  var ibox = readBox(node)
 
   return {
     id: node.id, parentId: parentId, name: node.name, type: node.type, depth: depth,
     scope: 'instance',
+    screenIndex: screenIndex, screenFamily: screenFamily, childIndex: childIndex, x: ibox.x, y: ibox.y, width: ibox.width, height: ibox.height,
     isInstance: true, mainComponentId: mainComponentId, overriddenFields: overriddenFields,
     hasFillOverride: hasFillOverride, hasSolidFill: hasSolidFill, isFillBound: isFillBound, fillColorHex: fillColorHex,
     hasStroke: false, isStrokeBound: true,
@@ -218,16 +243,18 @@ function extractInstance(node: InstanceNode, depth: number, parentId: string | n
   }
 }
 
-function extractWorking(node: SceneNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string): CollectedNode {
+function extractWorking(node: SceneNode, depth: number, parentId: string | null, rootFrameId: string | null, rootFrameName: string, screenFamily: string, screenIndex: number, childIndex: number): CollectedNode {
   var fillData = readFills(node)
   var strokeData = readStrokes(node)
   var radiusData = readRadius(node)
   var fontData = readFontSize(node)
   var spacingData = readSpacing(node)
+  var wbox = readBox(node)
 
   return {
     id: node.id, parentId: parentId, name: node.name, type: node.type, depth: depth,
     scope: 'working',
+    screenIndex: screenIndex, screenFamily: screenFamily, childIndex: childIndex, x: wbox.x, y: wbox.y, width: wbox.width, height: wbox.height,
     isInstance: false, mainComponentId: null, overriddenFields: [], hasFillOverride: false,
     hasSolidFill: fillData.hasSolidFill, isFillBound: fillData.isFillBound, fillColorHex: fillData.fillColorHex,
     hasStroke: strokeData.hasStroke, isStrokeBound: strokeData.isStrokeBound,

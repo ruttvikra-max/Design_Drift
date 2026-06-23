@@ -335,6 +335,35 @@
   flex-shrink: 0;
 }
 
+/* ── Issues Summary ───────────────────────────────────────────────────────── */
+
+.issues-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.issues-summary-count {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.issues-summary-label {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.issues-summary-clean {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--score-healthy);
+}
+
 /* ── Filter Tabs ──────────────────────────────────────────────────────────── */
 
 .filter-tabs {
@@ -473,6 +502,50 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.violation-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.violation-evidence-cmp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.violation-evidence-actual {
+  color: var(--severity-critical);
+  font-weight: 600;
+}
+
+.violation-evidence-arrow {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.violation-evidence-expected {
+  color: var(--score-healthy);
+  font-weight: 600;
+}
+
+.violation-evidence-chip {
+  font-size: 9px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.violation-evidence-agree {
+  font-size: 9px;
+  color: var(--text-muted);
 }
 
 .violation-row-right {
